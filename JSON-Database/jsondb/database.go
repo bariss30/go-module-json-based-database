@@ -1,28 +1,19 @@
-package main
+package dbmodule
 
 import (
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 )
 
-// Column ve Table
 type Column struct {
 	Name      string `json:"name"`
 	DataType  string `json:"data_type"`
 	IsPrimary bool   `json:"is_primary"`
 }
-
-// Go'daki struct içindeki değişken isimleri JSON içindeki anahtarlara dönüşüyor
-
-//✅ Web API'lerden gelen JSON verisini Go struct'ına çevirmek
-//✅ Go struct'larını JSON formatında saklamak veya göndermek
-//✅ JSON anahtarlarını özelleştirerek okunaklı hale getirmek
-
-// json:"..." etiketleri, JSON'daki anahtar isimlerini özelleştirmeye yarar.
-// json.Marshal() ile struct'ı JSON'a çevirebiliriz.
-// json.Unmarshal() ile JSON'u struct'a geri çevirebiliriz.
 
 type Table struct {
 	TableName string          `json:"table_name"`
@@ -30,176 +21,294 @@ type Table struct {
 	Rows      [][]interface{} `json:"rows"`
 }
 
-// PK oluşturma fonksiyonu
-var pkCounter int = 1
-
-func generatePrimaryKey() interface{} {
-	pkCounter++
-	return pkCounter - 1
+func getUserInput(prompt string) string {
+	var input string
+	fmt.Print(prompt)
+	fmt.Scanln(&input)
+	return input
 }
 
-// JSON dosyasına yeni satır ekleme fonksiyonu
-func addRowToJsonFile(newRow []interface{}, filePath string) error {
-
-	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0666)
-	if err != nil {
-		return fmt.Errorf("dosya açılırken hata oluştu: %v", err)
-	}
-	defer file.Close()
-
-	var table Table
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&table); err != nil && err.Error() != "EOF" {
-		return fmt.Errorf("JSON verisi okunurken hata oluştu: %v", err)
-	}
-
-	pkValue := generatePrimaryKey()
-	newRow = append([]interface{}{pkValue}, newRow...)
-	table.Rows = append(table.Rows, newRow)
-
-	file.Seek(0, 0)
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(&table); err != nil {
-		return fmt.Errorf("JSON verisi yazılırken hata oluştu: %v", err)
-	}
-
-	return nil
-}
-
-func deleteRowFromJsonFile(idToDelete int, filePath string) error {
-
-	file, err := os.OpenFile(filePath, os.O_RDWR, 0666)
-	if err != nil {
-		return fmt.Errorf("dosya açılırken hata oluştu: %v", err)
-	}
-	defer file.Close()
-
-	var table Table
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&table); err != nil {
-		return fmt.Errorf("JSON verisi okunurken hata oluştu: %v", err)
-	}
-
-	var newRows [][]interface{}
-	for _, row := range table.Rows {
-		if len(row) > 0 {
-			if id, ok := row[0].(float64); ok && int(id) == idToDelete {
-				continue // Bu satırı atlıyoruz (silme işlemi)
-			}
-		}
-		newRows = append(newRows, row)
-	}
-	table.Rows = newRows
-
-	file.Truncate(0) //Dosyanın içeriğini tamamen temizler.
-
-	file.Seek(0, 0)
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(&table); err != nil {
-		return fmt.Errorf("JSON verisi yazılırken hata oluştu: %v", err)
-	}
-
-	return nil
-}
-
-func readTableFromJsonFile(filePath string) (Table, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return Table{}, fmt.Errorf("dosya açılırken hata oluştu: %v", err)
-	}
-	defer file.Close()
-
-	var table Table
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&table); err != nil {
-		return Table{}, fmt.Errorf("JSON verisi okunurken hata oluştu: %v", err)
-	}
-
-	return table, nil
-}
-
-func printTableData(table Table) {
-	fmt.Printf("Tablo Adı: %s\n", table.TableName)
-	fmt.Println("Sütunlar:")
-	for _, column := range table.Columns {
-		fmt.Printf(" - %s (%s)\n", column.Name, column.DataType)
-	}
-
-	fmt.Println("\nVeriler:")
-	for _, row := range table.Rows {
-		fmt.Println(row)
-	}
-}
-
-// Veritabanı dosyası oluşturma fonksiyonu
-func createDatabaseJsonFile(filePath string) error {
+// JSON dosyasını oluştur
+func CreateDatabaseJsonFile(filePath string, table Table) error {
 	if err := os.MkdirAll("Database", os.ModePerm); err != nil {
 		log.Fatal("Dizin oluşturulurken hata oluştu:", err)
 	}
 
 	file, err := os.Create(filePath)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer file.Close()
 
-	table := Table{
-		TableName: "users",
-		Columns: []Column{
-			{"id", "int", true},
-			{"username", "string", false},
-			{"email", "string", false},
-			{"is_active", "bool", false},
-		},
+	jsonData, err := json.Marshal(table)
+	if err != nil {
+		return err
 	}
 
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(&table); err != nil {
-		log.Fatal(err)
+	_, err = file.Write(jsonData)
+	return err
+}
+
+// Kullanıcıdan veri al
+func AddRowFromUser(filePath string) error {
+	tableFile, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Println("Dosya okunamadı:", err)
+		return err
 	}
 
+	var table Table
+	if err := json.Unmarshal(tableFile, &table); err != nil {
+		fmt.Println("JSON parse hatası:", err)
+		return err
+	}
+
+	primaryKeys := []interface{}{}
+	otherValues := []interface{}{}
+
+	fmt.Println("Yeni veri ekleniyor:", table.TableName)
+
+	for _, column := range table.Columns {
+		for {
+			input := getUserInput(fmt.Sprintf("%s (%s): ", column.Name, column.DataType))
+
+			var value interface{}
+			var convErr error
+
+			switch column.DataType {
+			case "int":
+				value, convErr = strconv.Atoi(input)
+			case "float64":
+				value, convErr = strconv.ParseFloat(input, 64)
+			case "bool":
+				value, convErr = strconv.ParseBool(input)
+			default:
+				value = input
+			}
+
+			if convErr == nil {
+				if column.IsPrimary {
+					primaryKeys = append(primaryKeys, value) // Öncelikli olarak primary keyleri ekle
+				} else {
+					otherValues = append(otherValues, value)
+				}
+				break
+			} else {
+				fmt.Println("Geçersiz giriş, lütfen tekrar girin.")
+			}
+		}
+	}
+
+	newRow := append(primaryKeys, otherValues...) // Primary keyleri önce ekleyip ardından diğer verileri ekleme
+
+	table.Rows = append(table.Rows, newRow)
+
+	updatedJson, err := json.Marshal(table)
+	if err != nil {
+		fmt.Println("JSON oluşturulamadı:", err)
+		return err
+	}
+
+	return os.WriteFile(filePath, updatedJson, 0644)
+}
+
+// JSON dosyasından tabloyu okuma ve ekrana yazdırma fonksiyonu
+func ReadTable(filePath string) error {
+	tableFile, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	var table Table
+	if err := json.Unmarshal(tableFile, &table); err != nil {
+		return err
+	}
+
+	fmt.Println("\nTablo Adı:", table.TableName)
+	fmt.Println(strings.Repeat("-", 40))
+
+	for _, column := range table.Columns {
+		fmt.Printf("%-15s", column.Name)
+	}
+	fmt.Println("\n" + strings.Repeat("-", 40))
+
+	for i, row := range table.Rows {
+		fmt.Printf("%-5d", i+1)
+		for _, value := range row {
+			fmt.Printf("%-15v", value)
+		}
+		fmt.Println()
+	}
+
+	fmt.Println(strings.Repeat("-", 40))
 	return nil
 }
 
-func main() {
-	filePath := "Database/database.json"
-
-	// Veritabanı dosyasını oluştur
-	if err := createDatabaseJsonFile(filePath); err != nil {
-		log.Fatal(err)
-	}
-
-	// Yeni satırlar ekleyelim
-	addRowToJsonFile([]interface{}{"user1", "user1@example.com", true}, filePath)
-	addRowToJsonFile([]interface{}{"user2", "user2@example.com", false}, filePath)
-	addRowToJsonFile([]interface{}{"user3", "user3@example.com", true}, filePath)
-
-	// Veriyi ekrana yazdır
-	fmt.Println("\n--- EKLENEN KULLANICILAR ---")
-
-	table, err := readTableFromJsonFile(filePath)
+// Veri silme fonksiyonu
+func DeleteRowFromUser(filePath string) error {
+	tableFile, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
-	printTableData(table)
-
-	// ID=2 olan satırı silelim
-	fmt.Println("\n--- ID=2 OLAN KULLANICI SİLİNİYOR... ---")
-	if err := deleteRowFromJsonFile(2, filePath); err != nil {
-		log.Fatal(err)
+	var table Table
+	if err := json.Unmarshal(tableFile, &table); err != nil {
+		return err
 	}
 
-	// Güncellenmiş veriyi tekrar ekrana yazdır
-	fmt.Println("\n--- GÜNCELLENMİŞ KULLANICILAR ---")
-	table, err = readTableFromJsonFile(filePath)
+	if len(table.Rows) == 0 {
+		fmt.Println("Tabloda silinecek veri bulunmamaktadır.")
+		return nil
+	}
+
+	fmt.Println("Silinecek satırı seçin:")
+	for i := 0; i < len(table.Rows); i++ {
+		fmt.Printf("%d: ", i+1)
+		for _, value := range table.Rows[i] {
+			fmt.Printf("%v ", value)
+		}
+		fmt.Println()
+	}
+
+	rowToDelete, err := strconv.Atoi(getUserInput("Silmek istediğiniz satır numarasını girin: "))
+	if err != nil || rowToDelete < 1 || rowToDelete > len(table.Rows) {
+		fmt.Println("Geçersiz satır numarası.")
+		return nil
+	}
+
+	// Satırı sil
+	table.Rows = append(table.Rows[:rowToDelete-1], table.Rows[rowToDelete:]...)
+
+	updatedJson, err := json.Marshal(table)
 	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filePath, updatedJson, 0644)
+}
+
+// Veri güncelleme fonksiyonu
+func UpdateRowFromUser(filePath string) error {
+	tableFile, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	var table Table
+	if err := json.Unmarshal(tableFile, &table); err != nil {
+		return err
+	}
+
+	if len(table.Rows) == 0 {
+		fmt.Println("Tabloda güncellenecek veri bulunmamaktadır.")
+		return nil
+	}
+
+	fmt.Println("Güncellenecek satırı seçin:")
+	for i := 0; i < len(table.Rows); i++ {
+		fmt.Printf("%d: ", i+1)
+		for _, value := range table.Rows[i] {
+			fmt.Printf("%v ", value)
+		}
+		fmt.Println()
+	}
+
+	rowToUpdate, err := strconv.Atoi(getUserInput("Güncellemek istediğiniz satır numarasını girin: "))
+	if err != nil || rowToUpdate < 1 || rowToUpdate > len(table.Rows) {
+		fmt.Println("Geçersiz satır numarası.")
+		return nil
+	}
+
+	// Güncelleme işlemi
+	fmt.Println("Hangi sütunu güncellemek istersiniz?")
+	for i, column := range table.Columns {
+		fmt.Printf("%d: %s\n", i+1, column.Name)
+	}
+	columnToUpdate, err := strconv.Atoi(getUserInput("Güncellemek istediğiniz sütun numarasını girin: "))
+	if err != nil || columnToUpdate < 1 || columnToUpdate > len(table.Columns) {
+		fmt.Println("Geçersiz sütun numarası.")
+		return nil
+	}
+
+	newValue := getUserInput(fmt.Sprintf("Yeni değeri girin (%s): ", table.Columns[columnToUpdate-1].DataType))
+
+	// Sütundaki değeri güncelle
+	var updatedValue interface{}
+	switch table.Columns[columnToUpdate-1].DataType {
+	case "int":
+		updatedValue, _ = strconv.Atoi(newValue)
+	case "float64":
+		updatedValue, _ = strconv.ParseFloat(newValue, 64)
+	case "bool":
+		updatedValue, _ = strconv.ParseBool(newValue)
+	default:
+		updatedValue = newValue
+	}
+
+	table.Rows[rowToUpdate-1][columnToUpdate-1] = updatedValue
+
+	updatedJson, err := json.Marshal(table)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filePath, updatedJson, 0644)
+}
+
+func CreateTable() {
+	tableName := getUserInput("Tablo adını girin: ")
+	filePath := fmt.Sprintf("Database/%s.json", tableName) //string format
+
+	if _, err := os.Stat(filePath); err == nil { // https://stackoverflow.com/questions/12518876/how-to-check-if-a-file-exists-in-go
+		action := getUserInput("1: Verileri görüntüle\n2: Yeni satır ekle\n3: Satır sil\n4: Satır güncelle\nSeçiminiz: ")
+
+		if action == "1" {
+			if err := ReadTable(filePath); err != nil {
+				log.Fatal(err)
+			}
+		} else if action == "2" {
+			if err := AddRowFromUser(filePath); err != nil {
+				log.Fatal(err)
+			}
+		} else if action == "3" {
+			if err := DeleteRowFromUser(filePath); err != nil {
+				log.Fatal(err)
+			}
+		} else if action == "4" {
+			if err := UpdateRowFromUser(filePath); err != nil {
+				log.Fatal(err)
+			}
+		}
+		return
+	}
+
+	// Yeni tablo oluşturma
+	numColumns, _ := strconv.Atoi(getUserInput("Kaç sütun olacak?: ")) //https://stackoverflow.com/questions/4278430/convert-string-to-integer-type-in-go
+	columns := []Column{}
+
+	for i := 0; i < numColumns; i++ {
+		colName := getUserInput(fmt.Sprintf("%d. sütun adı: ", i+1))
+		colType := getUserInput("Veri tipi (string, int, float64, bool): ")
+		isPrimary := getUserInput("Birincil anahtar mı? (evet/hayır): ") == "evet"
+		columns = append(columns, Column{Name: colName, DataType: colType, IsPrimary: isPrimary})
+	}
+
+	table := Table{TableName: tableName, Columns: columns, Rows: [][]interface{}{}}
+
+	if err := CreateDatabaseJsonFile(filePath, table); err != nil {
 		log.Fatal(err)
 	}
-	printTableData(table)
 
-	fmt.Println("\nSilme işlemi tamamlandı!")
+	fmt.Println("Tablo oluşturuldu!")
+
+	for {
+		if getUserInput("Yeni satır eklemek ister misiniz? (evet/hayır): ") != "evet" {
+			break
+		}
+		if err := AddRowFromUser(filePath); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	fmt.Println("İşlem tamamlandı! Tablonuz kaydedildi.")
 }
