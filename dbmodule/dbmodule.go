@@ -10,16 +10,17 @@ import (
 )
 
 type Column struct {
-	Name      string json:"name"
-	DataType  string json:"data_type"
-	IsPrimary bool   json:"is_primary"
+    Name      string `json:"name"`
+    DataType  string `json:"data_type"`
+    IsPrimary bool   `json:"is_primary"`
 }
 
 type Table struct {
-	TableName string          json:"table_name"
-	Columns   []Column        json:"columns"
-	Rows      [][]interface{} json:"rows"
+    TableName string          `json:"table_name"`
+    Columns   []Column        `json:"columns"`
+    Rows      [][]interface{} `json:"rows"`
 }
+
 
 func getUserInput(prompt string) string {
 	var input string
